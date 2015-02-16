@@ -1,0 +1,211 @@
+workflow automate_vm
+{
+    param ( 
+    # Cloud service name to deploy the VMs to 
+    [Parameter(Mandatory = $true)] 
+    [String]$ServiceName="myvirm", 
+     
+    # Name of the Virtual Machine to create 
+    [Parameter(Mandatory = $true)] 
+    [String]$VMName="TestVM3", 
+     
+    # Location, this is not a mandatory parameter. THe script checkes the existence if service is not found. 
+    [Parameter(Mandatory = $false)] 
+    [String]$Location, 
+     
+    # Disk size in GB 
+    [Parameter(Mandatory = $true)] 
+    [Int32]$DiskSizeInGB = 100, 
+     
+    # Number of data disks to add to each virtual machine 
+    [Parameter(Mandatory = $true)] 
+    [Int32]$NumberOfDisks=2
+    ) 
+
+
+ 
+# The script has been tested on Powershell 3.0 
+InLineScript{
+Set-StrictMode -Version 3 }
+ 
+# Following modifies the Write-Verbose behavior to turn the messages on globally for this session 
+$VerbosePreference = "Continue" 
+ 
+# Check if Windows Azure Powershell is avaiable 
+if ((Get-Module -ListAvailable Azure) -eq $null) 
+{ 
+    throw "Windows Azure Powershell not found! Please make sure to install them from http://www.windowsazure.com/en-us/downloads/#cmd-line-tools" 
+} 
+ 
+ function Install-WinRmCertificate($ServiceName, $VMName) 
+{ 
+    $vm = Get-AzureVM -ServiceName $ServiceName -Name $VMName 
+    $winRmCertificateThumbprint = $vm.VM.DefaultWinRMCertificateThumbprint 
+     
+    $winRmCertificate = Get-AzureCertificate -ServiceName $ServiceName -Thumbprint $winRmCertificateThumbprint -ThumbprintAlgorithm sha1 
+     
+    $installedCert = Get-Item Cert:\CurrentUser\My\$winRmCertificateThumbprint -ErrorAction SilentlyContinue 
+     
+    if ($installedCert -eq $null) 
+    { 
+        $certBytes = [System.Convert]::FromBase64String($winRmCertificate.Data) 
+        $x509Cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate 
+        $x509Cert.Import($certBytes) 
+         
+        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store "Root", "LocalMachine" 
+        $store.Open("ReadWrite") 
+        $store.Add($x509Cert) 
+        $store.Close() 
+    } 
+} 
+ function Get-LatestImage 
+{ 
+    param 
+    ( 
+        # A filter for selecting the image family. 
+        # For example, "Windows Server 2012*", "*2012 Datacenter*", "*SQL*, "Sharepoint*" 
+        [Parameter(Mandatory = $true)] 
+        [String] 
+        $ImageFamilyNameFilter, 
+ 
+        # A switch to indicate whether or not to select the latest image where the publisher is Microsoft. 
+        # If this switch is not specified, then images from all possible publishers are considered. 
+        [Parameter(Mandatory = $false)] 
+        [switch] 
+        $OnlyMicrosoftImages 
+    ) 
+ 
+    # Get a list of all available images. 
+    $imageList = Get-AzureVMImage 
+ 
+    if ($OnlyMicrosoftImages.IsPresent) 
+    { 
+        $imageList = $imageList | 
+                         Where-Object { ` 
+                             ($_.PublisherName -ilike "Microsoft*" -and ` 
+                              $_.ImageFamily -ilike $ImageFamilyNameFilter ) } 
+    } 
+    else 
+    { 
+        $imageList = $imageList | 
+                         Where-Object { ` 
+                             ($_.ImageFamily -ilike $ImageFamilyNameFilter ) }  
+    } 
+ 
+    $imageList = $imageList |  
+                     Sort-Object -Unique -Descending -Property ImageFamily | 
+                     Sort-Object -Descending -Property PublishedDate 
+ 
+    $imageList | Select-Object -First(1) 
+} 
+ 
+ # Check if the current subscription's storage account's location is the same as the Location parameter 
+$subscription =  Set-AzureSubscription -SubscriptionName "TestSubscription"
+Add-AzureAccount
+$currentStorageAccountLocation = (Get-AzureStorageAccount -StorageAccountName portalvhdsx8k4zzb722q6q).Location 
+ 
+if ($Location -ne $currentStorageAccountLocation) 
+{ 
+    throw "Selected location parameter value, ""$Location"" is not the same as the active (current) subscription's current storage account location ` 
+        ($currentStorageAccountLocation). Either change the location parameter value, or select a different storage account for the ` 
+        subscription." 
+} 
+ 
+# Get an image to provision virtual machines from. 
+$imageFamilyNameFilter = "Windows Server 2012 Datacenter" 
+$image = Get-LatestImage -ImageFamilyNameFilter $imageFamilyNameFilter -OnlyMicrosoftImages 
+if ($image -eq $null) 
+{ 
+    throw "Unable to find an image for $imageFamilyNameFilter to provision Virtual Machine." 
+} 
+ 
+# Check if hosted service with $ServiceName exists 
+$existingService = Get-AzureService -ServiceName $ServiceName -ErrorAction SilentlyContinue 
+ 
+# Does the VM exist? If the VM is already there, just add the new disk 
+$existingVm = Get-AzureVM -ServiceName $ServiceName -Name $VMName -ErrorAction SilentlyContinue 
+ 
+if ($existingService -eq $null) 
+{ 
+    if ($Location -eq "") 
+    { 
+        throw "Service does not exist, please specify the Location parameter" 
+    }  
+    New-AzureService -ServiceName $ServiceName -Location $Location 
+} 
+ 
+if (($Location -ne "") -and ($existingService -ne $null)) 
+{ 
+    if ($existingService.Location -ne $Location) 
+    { 
+        Write-Warning "There is a service with the same name on a different location. Location parameter will be ignored." 
+    } 
+} 
+ 
+Write-Verbose "Prompt user for administrator credentials to use when provisioning the virtual machine(s)." 
+
+Write-Verbose "Administrator credentials captured.  Use these credentials to login to the virtual machine(s) when the script is complete." 
+ 
+# Configure the new Virtual Machine.
+
+#InLineScript{$username = "vishantsonone"
+#$password = "WGy@5B6#"
+#$secstr = New-Object -TypeName System.Security.SecureString ($password.ToCharArray()| ForEach-Object {$secstr.AppendChar($_)})
+#$credential = new-object -typename System.Management.Automation.PSCredential -argumentlist $username, $secstr}
+ 
+##$userName = $credential.GetNetworkCredential().UserName 
+##$password = $credential.GetNetworkCredential().Password 
+#$userName = "vishantsonone"
+#$password = = ConvertTo-SecureString -string "WGy@5B6#" 
+$username = "vishantsonone"
+$password = "WGy@5B6#"
+#$secstr = New-Object -TypeName System.Security.SecureString ($password.ToCharArray()| ForEach-Object {$secstr.AppendChar($_)})
+#$credential = new-object -typename System.Management.Automation.PSCredential -argumentlist $username,$password
+InLineScript{$credential = Get-Credential -UserName "vishantsonone" -Message "Enter Credentials Please!!!!!!"}
+$userName = $credential.GetNetworkCredential().UserName 
+$password = $credential.Password 
+ 
+if ($existingVm -ne $null) 
+{ 
+    # Find the starting LUN for the new disks 
+    $startingLun = ($existingVm | Get-AzureDataDisk | Measure-Object Lun -Maximum).Maximum + 1 
+     
+    for ($index = $startingLun; $index -lt $NumberOfDisks + $startingLun; $index++) 
+    {  
+        $diskLabel = "disk_" + $index 
+        $existingVm = $existingVm |  
+                           Add-AzureDataDisk -CreateNew -DiskSizeInGB $DiskSizeInGB -DiskLabel $diskLabel -LUN $index  
+                                #InlineScript{}     
+    } 
+     
+    $existingVm | Update-AzureVM 
+} 
+else 
+{ 
+   # $path = "https://newstorageone.blob.core.windows.net/vhds1/"
+    $vmConfig = New-AzureVMConfig -Name $VMName -InstanceSize Small  -ImageName $image.ImageName | Add-AzureProvisioningConfig -Windows -AdminUsername $userName -Password  $password     
+    
+    for ($index = 0; $index -lt $NumberOfDisks; $index++) 
+    {  
+        $diskLabel = "disk_" + $index 
+        $vmConfig = $vmConfig | Add-AzureDataDisk -CreateNew -DiskSizeInGB $DiskSizeInGB -DiskLabel $diskLabel -LUN $index   
+    } 
+     
+    # Create the Virtual Machine and wait for it to boot. 
+    New-AzureVM -ServiceName $ServiceName -VMs $vmConfig -WaitForBoot 
+} 
+ 
+## Install a remote management certificate from the Virtual Machine. 
+#Install-WinRmCertificate -serviceName $ServiceName -vmName $VMName 
+ 
+# Format data disks and assign drive letters. 
+#$winRmUri = Get-AzureWinRMUri -ServiceName $ServiceName -Name $VMName 
+ #InlineScript{}
+ #Invoke-Command -ConnectionUri $winRmUri.ToString() -Credential $credential -ScriptBlock { 
+   # Get-Disk |  
+    #Where-Object PartitionStyle -eq "RAW" |  
+   # Initialize-Disk -PartitionStyle MBR -PassThru |  
+   # New-Partition -AssignDriveLetter -UseMaximumSize |  
+    #Format-Volume -FileSystem NTFS -Confirm:$false 
+#}
+}
