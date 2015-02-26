@@ -148,17 +148,7 @@ Write-Verbose "Administrator credentials captured.  Use these credentials to log
  
 # Configure the new Virtual Machine.
 
-#InLineScript{$username = "vishantsonone"
-#$password = "WGy@5B6#"
-#$secstr = New-Object -TypeName System.Security.SecureString ($password.ToCharArray()| ForEach-Object {$secstr.AppendChar($_)})
-#$credential = new-object -typename System.Management.Automation.PSCredential -argumentlist $username, $secstr}
- 
-##$userName = $credential.GetNetworkCredential().UserName 
-##$password = $credential.GetNetworkCredential().Password 
-#$userName = "vishantsonone"
-#$password = = ConvertTo-SecureString -string "WGy@5B6#" 
-$username = "vishantsonone"
-$password = "WGy@5B6#"
+
 #$secstr = New-Object -TypeName System.Security.SecureString ($password.ToCharArray()| ForEach-Object {$secstr.AppendChar($_)})
 #$credential = new-object -typename System.Management.Automation.PSCredential -argumentlist $username,$password
 InLineScript{$credential = Get-Credential -UserName "vishantsonone" -Message "Enter Credentials Please!!!!!!"}
